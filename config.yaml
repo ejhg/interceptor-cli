@@ -1,0 +1,22 @@
+proxies:
+  - name: "API Gateway"
+    port: 3001
+    target: "https://jsonplaceholder.typicode.com"
+    color: "cyan"
+    
+  - name: "Auth Service"
+    port: 3002
+    target: "https://httpbin.org"
+    color: "green"
+    
+  - name: "Data Service"
+    port: 3003
+    target: "https://api.github.com"
+    color: "yellow"
+
+logging:
+  showHeaders: true
+  showBody: true
+  showQuery: true
+  showResponse: true
+  maxBodyLength: 1000
