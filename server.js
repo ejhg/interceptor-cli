@@ -37,11 +37,9 @@ function formatHeaders(headers) {
   return JSON.stringify(filtered, null, 2);
 }
 
-function truncateBody(body, maxLength) {
+function formatBody(body) {
   const bodyStr = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
-  if (!bodyStr) return '';
-  if (bodyStr.length <= maxLength) return bodyStr;
-  return bodyStr.substring(0, maxLength) + chalk.gray('... [truncated]');
+  return bodyStr || '';
 }
 
 function createProxyServer(proxyConfig, loggingConfig) {
@@ -78,7 +76,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
     if (loggingConfig.showBody && req.body) {
       console.log(chalk.bold('\nRequest Body:'));
       const bodyContent = req.body instanceof Buffer ? req.body.toString() : req.body;
-      console.log(colorFn(truncateBody(bodyContent, loggingConfig.maxBodyLength || 1000)));
+      console.log(colorFn(formatBody(bodyContent)));
     }
 
     try {
@@ -118,7 +116,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
           const responseBody = typeof response.data === 'string' 
             ? response.data 
             : JSON.stringify(response.data, null, 2);
-          console.log(colorFn(truncateBody(responseBody, loggingConfig.maxBodyLength || 1000)));
+          console.log(colorFn(formatBody(responseBody)));
         }
       }
       
