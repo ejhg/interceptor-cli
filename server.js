@@ -200,11 +200,14 @@ function createProxyServer(proxyConfig, loggingConfig) {
         }
         
         // Update cache with the new request (including headers)
+        // Preserve responseHeaders from previous cache if they exist
         const filteredHeaders = { ...req.headers };
         delete filteredHeaders.host;
+        const existingCache = requestCache.get(modelKey);
         requestCache.set(modelKey, {
           body: parsedBody,
-          headers: filteredHeaders
+          headers: filteredHeaders,
+          responseHeaders: existingCache?.responseHeaders // Preserve response headers from previous request
         });
       } else {
         console.log(`\n${tag} ${chalk.bold('Request Body:')}`);
