@@ -4,8 +4,12 @@ const chalk = require('chalk');
 const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
+const diff = require('deep-diff');
 
 const CONFIG_FILE = process.env.CONFIG_FILE || 'config.yaml';
+
+// cache by model string
+const requestCache = new Map();
 
 function loadConfig() {
   try {
@@ -49,6 +53,42 @@ function formatBody(body) {
   return bodyStr || '';
 }
 
+function formatDiff(differences, colorFn) {
+  if (!differences || differences.length === 0) {
+    return colorFn('  No differences from cached request');
+  }
+  
+  const output = [];
+  differences.forEach(d => {
+    switch(d.kind) {
+      case 'N': // New property
+        output.push(chalk.green(`  + Added: ${d.path.join('.')} = ${JSON.stringify(d.rhs)}`));
+        break;
+      case 'D': // Deleted property
+        output.push(chalk.red(`  - Removed: ${d.path.join('.')}`));
+        break;
+      case 'E': // Edited property
+        output.push(chalk.yellow(`  ~ Changed: ${d.path.join('.')}`));
+        output.push(chalk.red(`    - ${JSON.stringify(d.lhs)}`));
+        output.push(chalk.green(`    + ${JSON.stringify(d.rhs)}`));
+        break;
+      case 'A': // Array change
+        output.push(chalk.yellow(`  ~ Array changed: ${d.path.join('.')}[${d.index}]`));
+        if (d.item.kind === 'N') {
+          output.push(chalk.green(`    + ${JSON.stringify(d.item.rhs)}`));
+        } else if (d.item.kind === 'D') {
+          output.push(chalk.red(`    - ${JSON.stringify(d.item.lhs)}`));
+        } else if (d.item.kind === 'E') {
+          output.push(chalk.red(`    - ${JSON.stringify(d.item.lhs)}`));
+          output.push(chalk.green(`    + ${JSON.stringify(d.item.rhs)}`));
+        }
+        break;
+    }
+  });
+  
+  return output.join('\n');
+}
+
 function createProxyServer(proxyConfig, loggingConfig) {
   const app = express();
   
@@ -81,9 +121,45 @@ function createProxyServer(proxyConfig, loggingConfig) {
     }
     
     if (loggingConfig.showBody && req.body) {
-      console.log(chalk.bold('\nRequest Body:'));
       const bodyContent = req.body instanceof Buffer ? req.body.toString() : req.body;
-      console.log(colorFn(formatBody(bodyContent)));
+      
+      // Check if body is JSON and has a model property
+      let isJsonWithModel = false;
+      let parsedBody = null;
+      let modelKey = null;
+      
+      try {
+        parsedBody = typeof bodyContent === 'string' ? JSON.parse(bodyContent) : bodyContent;
+        if (parsedBody && typeof parsedBody === 'object' && parsedBody.model) {
+          isJsonWithModel = true;
+          modelKey = parsedBody.model;
+        }
+      } catch (e) {
+        // Not JSON or parsing error, treat as regular body
+      }
+      
+      if (isJsonWithModel && modelKey) {
+        const cachedRequest = requestCache.get(modelKey);
+        
+        if (cachedRequest) {
+          console.log(chalk.bold('\nRequest Body') + chalk.gray(` (model: ${modelKey}) - Showing diff from previous request:`));
+          const differences = diff.diff(cachedRequest, parsedBody);
+          console.log(formatDiff(differences, colorFn));
+          
+          // Show full body in collapsed/dimmed format
+          console.log(chalk.dim('\nFull request body:'));
+          console.log(chalk.dim(colorFn(formatBody(parsedBody))));
+        } else {
+          console.log(chalk.bold('\nRequest Body') + chalk.gray(` (model: ${modelKey}) - First request, caching...`));
+          console.log(colorFn(formatBody(parsedBody)));
+        }
+        
+        // Update cache with the new request
+        requestCache.set(modelKey, parsedBody);
+      } else {
+        console.log(chalk.bold('\nRequest Body:'));
+        console.log(colorFn(formatBody(bodyContent)));
+      }
     }
 
     try {
