@@ -17,18 +17,25 @@ function loadConfig() {
   }
 }
 
-function getColorFunction(colorName) {
-  const colors = {
-    red: chalk.red,
-    green: chalk.green,
-    yellow: chalk.yellow,
-    blue: chalk.blue,
-    magenta: chalk.magenta,
-    cyan: chalk.cyan,
-    white: chalk.white,
-    gray: chalk.gray
-  };
-  return colors[colorName] || chalk.white;
+const colorRotation = [
+  chalk.cyan,
+  chalk.green,
+  chalk.yellow,
+  chalk.magenta,
+  chalk.blue,
+  chalk.redBright,
+  chalk.greenBright,
+  chalk.yellowBright,
+  chalk.cyanBright,
+  chalk.magentaBright
+];
+
+let colorIndex = 0;
+
+function getNextColor() {
+  const color = colorRotation[colorIndex];
+  colorIndex = (colorIndex + 1) % colorRotation.length;
+  return color;
 }
 
 function formatHeaders(headers) {
@@ -44,13 +51,13 @@ function formatBody(body) {
 
 function createProxyServer(proxyConfig, loggingConfig) {
   const app = express();
-  const colorFn = getColorFunction(proxyConfig.color);
   
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
   app.use(express.raw({ type: '*/*', limit: '50mb' }));
 
   app.use(async (req, res) => {
+    const colorFn = getNextColor();
     const timestamp = new Date().toISOString();
     const method = req.method;
     const url = req.url;
@@ -147,8 +154,8 @@ function createProxyServer(proxyConfig, loggingConfig) {
   });
 
   const server = app.listen(proxyConfig.port, () => {
-    console.log(colorFn(`🚀 ${proxyConfig.name} proxy started on port ${proxyConfig.port}`));
-    console.log(colorFn(`   ↳ Proxying to: ${proxyConfig.target}`));
+    console.log(chalk.bold.white(`🚀 ${proxyConfig.name} proxy started on port ${proxyConfig.port}`));
+    console.log(chalk.gray(`   ↳ Proxying to: ${proxyConfig.target}`));
   });
 
   return server;
