@@ -121,19 +121,14 @@ function createProxyServer(proxyConfig, loggingConfig) {
       console.log(addColorTag(JSON.stringify(req.query, null, 2), colorFn));
     }
     
-    if (loggingConfig.showHeaders) {
-      console.log(`\n${tag} ${chalk.bold('Request Headers:')}`);
-      console.log(addColorTag(formatHeaders(req.headers), colorFn));
-    }
+    // Process headers and body for caching
+    const bodyContent = req.body ? (req.body instanceof Buffer ? req.body.toString() : req.body) : null;
+    let isJsonWithModel = false;
+    let parsedBody = null;
+    let modelKey = null;
     
-    if (loggingConfig.showBody && req.body) {
-      const bodyContent = req.body instanceof Buffer ? req.body.toString() : req.body;
-      
-      // Check if body is JSON and has a model property
-      let isJsonWithModel = false;
-      let parsedBody = null;
-      let modelKey = null;
-      
+    // Check if body is JSON and has a model property
+    if (bodyContent) {
       try {
         parsedBody = typeof bodyContent === 'string' ? JSON.parse(bodyContent) : bodyContent;
         if (parsedBody && typeof parsedBody === 'object' && parsedBody.model) {
@@ -143,25 +138,74 @@ function createProxyServer(proxyConfig, loggingConfig) {
       } catch (e) {
         // Not JSON or parsing error, treat as regular body
       }
+    }
+    
+    // Handle headers - show diff if we have a cached request with the same model
+    if (loggingConfig.showHeaders) {
+      const filteredHeaders = { ...req.headers };
+      delete filteredHeaders.host;
       
       if (isJsonWithModel && modelKey) {
-        const cachedRequest = requestCache.get(modelKey);
+        const cachedData = requestCache.get(modelKey);
         
-        if (cachedRequest) {
-          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Showing diff from previous request:`)}`);
-          const differences = diff.diff(cachedRequest, parsedBody);
-          console.log(formatDiff(differences, colorFn));
+        if (cachedData && cachedData.headers) {
+          console.log(`\n${tag} ${chalk.bold('Request Headers')}${chalk.gray(' - Showing diff from previous request:')}`);
+          const headerDiffs = diff.diff(cachedData.headers, filteredHeaders);
+          if (headerDiffs && headerDiffs.length > 0) {
+            console.log(formatDiff(headerDiffs, colorFn));
+          } else {
+            console.log(addColorTag('  No header changes', colorFn));
+          }
+        } else {
+          console.log(`\n${tag} ${chalk.bold('Request Headers:')}`);
+          console.log(addColorTag(formatHeaders(filteredHeaders), colorFn));
+        }
+      } else {
+        console.log(`\n${tag} ${chalk.bold('Request Headers:')}`);
+        console.log(addColorTag(formatHeaders(req.headers), colorFn));
+      }
+    }
+    
+    // Handle body
+    if (loggingConfig.showBody && bodyContent) {
+      if (isJsonWithModel && modelKey) {
+        const cachedData = requestCache.get(modelKey);
+        
+        // Check messages array logic
+        let shouldDiff = false;
+        let cacheBusted = false;
+        
+        if (cachedData) {
+          const currentMessages = parsedBody.messages || [];
+          const cachedMessages = cachedData.body?.messages || [];
           
-          // Show full body in collapsed/dimmed format
-          console.log(`\n${tag} ${chalk.dim('Full request body:')}`);
-          console.log(chalk.dim(addColorTag(formatBody(parsedBody), colorFn)));
+          if (currentMessages.length > cachedMessages.length) {
+            shouldDiff = true;
+          } else if (currentMessages.length <= cachedMessages.length) {
+            cacheBusted = true;
+            requestCache.delete(modelKey);
+          }
+        }
+        
+        if (cachedData && shouldDiff) {
+          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Showing diff from previous request:`)}`);
+          const differences = diff.diff(cachedData.body, parsedBody);
+          console.log(formatDiff(differences, colorFn));
+        } else if (cacheBusted) {
+          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Cache busted (messages array reset), starting fresh...`)}`);
+          console.log(addColorTag(formatBody(parsedBody), colorFn));
         } else {
           console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - First request, caching...`)}`);
           console.log(addColorTag(formatBody(parsedBody), colorFn));
         }
         
-        // Update cache with the new request
-        requestCache.set(modelKey, parsedBody);
+        // Update cache with the new request (including headers)
+        const filteredHeaders = { ...req.headers };
+        delete filteredHeaders.host;
+        requestCache.set(modelKey, {
+          body: parsedBody,
+          headers: filteredHeaders
+        });
       } else {
         console.log(`\n${tag} ${chalk.bold('Request Body:')}`);
         console.log(addColorTag(formatBody(bodyContent), colorFn));
@@ -196,8 +240,32 @@ function createProxyServer(proxyConfig, loggingConfig) {
       
       if (loggingConfig.showResponse) {
         if (loggingConfig.showHeaders) {
-          console.log(`\n${tag} ${chalk.bold('Response Headers:')}`);
-          console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn));
+          // Handle response headers diff if we have cached data
+          if (isJsonWithModel && modelKey) {
+            const cachedData = requestCache.get(modelKey);
+            
+            if (cachedData && cachedData.responseHeaders) {
+              console.log(`\n${tag} ${chalk.bold('Response Headers')}${chalk.gray(' - Showing diff from previous response:')}`);
+              const responseHeaderDiffs = diff.diff(cachedData.responseHeaders, response.headers);
+              if (responseHeaderDiffs && responseHeaderDiffs.length > 0) {
+                console.log(formatDiff(responseHeaderDiffs, colorFn));
+              } else {
+                console.log(addColorTag('  No response header changes', colorFn));
+              }
+            } else {
+              console.log(`\n${tag} ${chalk.bold('Response Headers:')}`);
+              console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn));
+            }
+            
+            // Update cached response headers
+            if (cachedData) {
+              cachedData.responseHeaders = response.headers;
+              requestCache.set(modelKey, cachedData);
+            }
+          } else {
+            console.log(`\n${tag} ${chalk.bold('Response Headers:')}`);
+            console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn));
+          }
         }
         
         if (response.data) {
