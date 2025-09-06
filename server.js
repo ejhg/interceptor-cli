@@ -5,6 +5,7 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 const diff = require('deep-diff');
+const { isSSEResponse, formatSSEResponse } = require('./sse-parser');
 
 const CONFIG_FILE = process.env.CONFIG_FILE || 'config.yaml';
 
@@ -53,9 +54,11 @@ function formatBody(body) {
   return bodyStr || '';
 }
 
-function addColorTag(text, colorFn) {
-  const tag = colorFn('█');
-  return text.split('\n').map(line => `${tag} ${line}`).join('\n');
+function addColorTag(text, colorFn, modelKey, isResponse = false) {
+  const arrow = isResponse ? '<<' : '>>';
+  const tag = colorFn(arrow);
+  const modelDisplay = modelKey ? colorFn(` [${modelKey}]`) : '';
+  return text.split('\n').map(line => `${tag}${modelDisplay} ${line}`).join('\n');
 }
 
 function formatDiff(differences, colorFn) {
@@ -132,16 +135,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
     const url = req.url;
     const targetUrl = `${proxyConfig.target}${url}`;
     
-    const tag = colorFn('█');
-    console.log('\n' + colorFn('━'.repeat(80)));
-    console.log(`${tag} [${timestamp}] ${proxyConfig.name}:${proxyConfig.port} | ${method} ${url}`);
-    
-    if (loggingConfig.showQuery && Object.keys(req.query).length > 0) {
-      console.log(`\n${tag} ${chalk.bold('Query Parameters:')}`);
-      console.log(addColorTag(JSON.stringify(req.query, null, 2), colorFn));
-    }
-    
-    // Process headers and body for caching
+    // Process body early to get model key for header display
     const bodyContent = req.body ? (req.body instanceof Buffer ? req.body.toString() : req.body) : null;
     let isJsonWithModel = false;
     let parsedBody = null;
@@ -160,6 +154,17 @@ function createProxyServer(proxyConfig, loggingConfig) {
       }
     }
     
+    const modelDisplay = modelKey ? ` [${modelKey}]` : '';
+    const requestTag = colorFn('>>');
+    const responseTag = colorFn('<<');
+    console.log('\n' + colorFn('━'.repeat(80)));
+    console.log(`${requestTag}${colorFn(modelDisplay)} [${timestamp}] ${proxyConfig.name}:${proxyConfig.port} | ${method} ${url}`);
+    
+    if (loggingConfig.showQuery && Object.keys(req.query).length > 0) {
+      console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Query Parameters:')}`);
+      console.log(addColorTag(JSON.stringify(req.query, null, 2), colorFn, modelKey));
+    }
+    
     // Handle headers - show diff if we have a cached request with the same model
     if (loggingConfig.showHeaders) {
       const filteredHeaders = { ...req.headers };
@@ -169,20 +174,20 @@ function createProxyServer(proxyConfig, loggingConfig) {
         const cachedData = requestCache.get(modelKey);
         
         if (cachedData && cachedData.headers) {
-          console.log(`\n${tag} ${chalk.bold('Request Headers')}${chalk.gray(' - Showing diff from previous request:')}`);
+          console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Request Headers')}${chalk.gray(' - Showing diff from previous request:')}`);
           const headerDiffs = diff.diff(cachedData.headers, filteredHeaders);
           if (headerDiffs && headerDiffs.length > 0) {
             console.log(formatDiff(headerDiffs, colorFn));
           } else {
-            console.log(addColorTag('  No header changes', colorFn));
+            console.log(addColorTag('  No header changes', colorFn, modelKey));
           }
         } else {
-          console.log(`\n${tag} ${chalk.bold('Request Headers:')}`);
-          console.log(addColorTag(formatHeaders(filteredHeaders), colorFn));
+          console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Headers:')}`);
+          console.log(addColorTag(formatHeaders(filteredHeaders), colorFn, modelKey));
         }
       } else {
-        console.log(`\n${tag} ${chalk.bold('Request Headers:')}`);
-        console.log(addColorTag(formatHeaders(req.headers), colorFn));
+        console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Headers:')}`);
+        console.log(addColorTag(formatHeaders(req.headers), colorFn, modelKey));
       }
     }
     
@@ -208,15 +213,15 @@ function createProxyServer(proxyConfig, loggingConfig) {
         }
         
         if (cachedData && shouldDiff) {
-          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Showing diff from previous request:`)}`);
+          console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Request Body')}${chalk.gray(' - Showing diff from previous request:')}`);
           const differences = diff.diff(cachedData.body, parsedBody);
           console.log(formatDiff(differences, colorFn));
         } else if (cacheBusted) {
-          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Cache busted (messages array reset), starting fresh...`)}`);
-          console.log(addColorTag(formatBody(parsedBody), colorFn));
+          console.log(`\n${requestTag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Cache busted (messages array reset), starting fresh...`)}`);
+          console.log(addColorTag(formatBody(parsedBody), colorFn, modelKey));
         } else {
-          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - First request, caching...`)}`);
-          console.log(addColorTag(formatBody(parsedBody), colorFn));
+          console.log(`\n${requestTag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - First request, caching...`)}`);
+          console.log(addColorTag(formatBody(parsedBody), colorFn, modelKey));
         }
         
         // Update cache with the new request (including headers)
@@ -230,8 +235,8 @@ function createProxyServer(proxyConfig, loggingConfig) {
           responseHeaders: existingCache?.responseHeaders // Preserve response headers from previous request
         });
       } else {
-        console.log(`\n${tag} ${chalk.bold('Request Body:')}`);
-        console.log(addColorTag(formatBody(bodyContent), colorFn));
+        console.log(`\n${requestTag} ${chalk.bold('Request Body:')}`);
+        console.log(addColorTag(formatBody(bodyContent), colorFn, modelKey));
       }
     }
 
@@ -253,13 +258,12 @@ function createProxyServer(proxyConfig, loggingConfig) {
         requestConfig.data = req.body instanceof Buffer ? req.body.toString() : req.body;
       }
 
-      console.log(`\n${tag} ${chalk.dim('⏳ Proxying request...')}`);
       const startTime = Date.now();
       
       const response = await axios(requestConfig);
       
       const duration = Date.now() - startTime;
-      console.log(`\n${tag} ${chalk.bold('✓ Response received:')} ${response.status} ${response.statusText} (${duration}ms)`);
+      console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('✓ Received:')} ${response.status} ${response.statusText} (${duration}ms)`);
       
       if (loggingConfig.showResponse) {
         if (loggingConfig.showHeaders) {
@@ -268,16 +272,16 @@ function createProxyServer(proxyConfig, loggingConfig) {
             const cachedData = requestCache.get(modelKey);
             
             if (cachedData && cachedData.responseHeaders) {
-              console.log(`\n${tag} ${chalk.bold('Response Headers')}${chalk.gray(' - Showing diff from previous response:')}`);
+              console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Headers')}${chalk.gray(' - Showing diff:')}`);
               const responseHeaderDiffs = diff.diff(cachedData.responseHeaders, response.headers);
               if (responseHeaderDiffs && responseHeaderDiffs.length > 0) {
                 console.log(formatDiff(responseHeaderDiffs, colorFn));
               } else {
-                console.log(addColorTag('  No response header changes', colorFn));
+                console.log(addColorTag('  No response header changes', colorFn, modelKey, true));
               }
             } else {
-              console.log(`\n${tag} ${chalk.bold('Response Headers:')}`);
-              console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn));
+              console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Headers:')}`);
+              console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn, modelKey, true));
             }
             
             // Update cached response headers
@@ -286,17 +290,24 @@ function createProxyServer(proxyConfig, loggingConfig) {
               requestCache.set(modelKey, cachedData);
             }
           } else {
-            console.log(`\n${tag} ${chalk.bold('Response Headers:')}`);
-            console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn));
+            console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Headers:')}`);
+            console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn, modelKey, true));
           }
         }
         
         if (response.data) {
-          console.log(`\n${tag} ${chalk.bold('Response Body:')}`);
-          const responseBody = typeof response.data === 'string' 
-            ? response.data 
-            : JSON.stringify(response.data, null, 2);
-          console.log(addColorTag(formatBody(responseBody), colorFn));
+          // Check if this is an SSE response
+          if (isSSEResponse(response.headers)) {
+            console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Body')}${chalk.gray(' (SSE stream):')}`);
+            const formattedSSE = formatSSEResponse(response.data, colorFn);
+            console.log(addColorTag(formattedSSE, colorFn, modelKey, true));
+          } else {
+            console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Body:')}`);
+            const responseBody = typeof response.data === 'string' 
+              ? response.data 
+              : JSON.stringify(response.data, null, 2);
+            console.log(addColorTag(formatBody(responseBody), colorFn, modelKey, true));
+          }
         }
       }
       
@@ -310,10 +321,10 @@ function createProxyServer(proxyConfig, loggingConfig) {
       res.status(response.status).send(response.data);
       
     } catch (error) {
-      console.error(`\n${tag} ${chalk.red.bold('✗ Proxy Error:')} ${error.message}`);
+      console.error(`\n${responseTag}${modelDisplay} ${chalk.red.bold('✗ Error:')} ${error.message}`);
       if (error.response) {
-        console.error(`${tag} ${chalk.red('Response Status:')} ${error.response.status}`);
-        console.error(`${tag} ${chalk.red('Response Data:')} ${error.response.data}`);
+        console.error(`${responseTag}${modelDisplay} ${chalk.red('Status:')} ${error.response.status}`);
+        console.error(`${responseTag}${modelDisplay} ${chalk.red('Data:')} ${error.response.data}`);
       }
       
       res.status(error.response?.status || 500).json({
