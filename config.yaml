@@ -1,8 +1,7 @@
 proxies:
   - name: "api"
     port: 7000
-    target:
-    color: "cyan"
+    target: "https://api.anthropic.com"
     
 logging:
   showHeaders: true
