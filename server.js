@@ -63,8 +63,32 @@ function formatDiff(differences, colorFn) {
     return colorFn('  No differences from cached request');
   }
   
+  // Sort differences to ensure array changes are in order
+  const sortedDiffs = [...differences].sort((a, b) => {
+    // Compare paths element by element
+    const pathA = a.path || [];
+    const pathB = b.path || [];
+    
+    for (let i = 0; i < Math.min(pathA.length, pathB.length); i++) {
+      if (pathA[i] !== pathB[i]) {
+        // If one is a number (array index) and one isn't, put non-numbers first
+        if (typeof pathA[i] === 'number' && typeof pathB[i] === 'number') {
+          return pathA[i] - pathB[i];
+        }
+        return String(pathA[i]).localeCompare(String(pathB[i]));
+      }
+    }
+    
+    // If paths are equal up to this point, also compare array indices for 'A' type
+    if (a.kind === 'A' && b.kind === 'A' && a.index !== undefined && b.index !== undefined) {
+      return a.index - b.index;
+    }
+    
+    return pathA.length - pathB.length;
+  });
+  
   const output = [];
-  differences.forEach(d => {
+  sortedDiffs.forEach(d => {
     switch(d.kind) {
       case 'N': // New property
         output.push(chalk.green(`  + Added: ${d.path.join('.')} = ${JSON.stringify(d.rhs)}`));
@@ -110,11 +134,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
     
     const tag = colorFn('█');
     console.log('\n' + colorFn('━'.repeat(80)));
-    console.log(colorFn(`[${timestamp}] ${proxyConfig.name} (Port ${proxyConfig.port})`));
-    console.log(colorFn('━'.repeat(80)));
-    
-    console.log(`${tag} ${chalk.bold('Request:')} ${method} ${url}`);
-    console.log(`${tag} ${chalk.bold('Target:')} ${targetUrl}`);
+    console.log(`${tag} [${timestamp}] ${proxyConfig.name}:${proxyConfig.port} | ${method} ${url}`);
     
     if (loggingConfig.showQuery && Object.keys(req.query).length > 0) {
       console.log(`\n${tag} ${chalk.bold('Query Parameters:')}`);
@@ -179,9 +199,9 @@ function createProxyServer(proxyConfig, loggingConfig) {
           const currentMessages = parsedBody.messages || [];
           const cachedMessages = cachedData.body?.messages || [];
           
-          if (currentMessages.length > cachedMessages.length) {
+          if (currentMessages.length >= cachedMessages.length) {
             shouldDiff = true;
-          } else if (currentMessages.length <= cachedMessages.length) {
+          } else {
             cacheBusted = true;
             requestCache.delete(modelKey);
           }
@@ -307,7 +327,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
   });
 
   const server = app.listen(proxyConfig.port, () => {
-    console.log(chalk.bold.white(`🚀 ${proxyConfig.name} proxy started on port ${proxyConfig.port}`));
+    console.log(chalk.bold.white(`${proxyConfig.name} proxy started on port ${proxyConfig.port}`));
     console.log(chalk.gray(`   ↳ Proxying to: ${proxyConfig.target}`));
   });
 
@@ -315,8 +335,6 @@ function createProxyServer(proxyConfig, loggingConfig) {
 }
 
 function main() {
-  console.log(chalk.bold.blue('\n🔧 Multi-Port Proxy Server Starting...\n'));
-  
   const config = loadConfig();
   
   if (!config.proxies || config.proxies.length === 0) {
@@ -334,8 +352,6 @@ function main() {
       console.error(chalk.red(`Failed to start proxy "${proxyConfig.name}":`, error.message));
     }
   });
-  
-  console.log(chalk.bold.green(`\n✅ All ${servers.length} proxy servers started successfully!\n`));
   
   process.on('SIGINT', () => {
     console.log(chalk.yellow('\n\n👋 Shutting down proxy servers...'));
