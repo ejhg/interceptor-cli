@@ -53,6 +53,11 @@ function formatBody(body) {
   return bodyStr || '';
 }
 
+function addColorTag(text, colorFn) {
+  const tag = colorFn('█');
+  return text.split('\n').map(line => `${tag} ${line}`).join('\n');
+}
+
 function formatDiff(differences, colorFn) {
   if (!differences || differences.length === 0) {
     return colorFn('  No differences from cached request');
@@ -103,21 +108,22 @@ function createProxyServer(proxyConfig, loggingConfig) {
     const url = req.url;
     const targetUrl = `${proxyConfig.target}${url}`;
     
+    const tag = colorFn('█');
     console.log('\n' + colorFn('━'.repeat(80)));
     console.log(colorFn(`[${timestamp}] ${proxyConfig.name} (Port ${proxyConfig.port})`));
     console.log(colorFn('━'.repeat(80)));
     
-    console.log(chalk.bold('Request:'), `${method} ${url}`);
-    console.log(chalk.bold('Target:'), targetUrl);
+    console.log(`${tag} ${chalk.bold('Request:')} ${method} ${url}`);
+    console.log(`${tag} ${chalk.bold('Target:')} ${targetUrl}`);
     
     if (loggingConfig.showQuery && Object.keys(req.query).length > 0) {
-      console.log(chalk.bold('\nQuery Parameters:'));
-      console.log(colorFn(JSON.stringify(req.query, null, 2)));
+      console.log(`\n${tag} ${chalk.bold('Query Parameters:')}`);
+      console.log(addColorTag(JSON.stringify(req.query, null, 2), colorFn));
     }
     
     if (loggingConfig.showHeaders) {
-      console.log(chalk.bold('\nRequest Headers:'));
-      console.log(colorFn(formatHeaders(req.headers)));
+      console.log(`\n${tag} ${chalk.bold('Request Headers:')}`);
+      console.log(addColorTag(formatHeaders(req.headers), colorFn));
     }
     
     if (loggingConfig.showBody && req.body) {
@@ -142,23 +148,23 @@ function createProxyServer(proxyConfig, loggingConfig) {
         const cachedRequest = requestCache.get(modelKey);
         
         if (cachedRequest) {
-          console.log(chalk.bold('\nRequest Body') + chalk.gray(` (model: ${modelKey}) - Showing diff from previous request:`));
+          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Showing diff from previous request:`)}`);
           const differences = diff.diff(cachedRequest, parsedBody);
           console.log(formatDiff(differences, colorFn));
           
           // Show full body in collapsed/dimmed format
-          console.log(chalk.dim('\nFull request body:'));
-          console.log(chalk.dim(colorFn(formatBody(parsedBody))));
+          console.log(`\n${tag} ${chalk.dim('Full request body:')}`);
+          console.log(chalk.dim(addColorTag(formatBody(parsedBody), colorFn)));
         } else {
-          console.log(chalk.bold('\nRequest Body') + chalk.gray(` (model: ${modelKey}) - First request, caching...`));
-          console.log(colorFn(formatBody(parsedBody)));
+          console.log(`\n${tag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - First request, caching...`)}`);
+          console.log(addColorTag(formatBody(parsedBody), colorFn));
         }
         
         // Update cache with the new request
         requestCache.set(modelKey, parsedBody);
       } else {
-        console.log(chalk.bold('\nRequest Body:'));
-        console.log(colorFn(formatBody(bodyContent)));
+        console.log(`\n${tag} ${chalk.bold('Request Body:')}`);
+        console.log(addColorTag(formatBody(bodyContent), colorFn));
       }
     }
 
@@ -180,26 +186,26 @@ function createProxyServer(proxyConfig, loggingConfig) {
         requestConfig.data = req.body instanceof Buffer ? req.body.toString() : req.body;
       }
 
-      console.log(chalk.dim('\n⏳ Proxying request...'));
+      console.log(`\n${tag} ${chalk.dim('⏳ Proxying request...')}`);
       const startTime = Date.now();
       
       const response = await axios(requestConfig);
       
       const duration = Date.now() - startTime;
-      console.log(chalk.bold('\n✓ Response received:'), `${response.status} ${response.statusText} (${duration}ms)`);
+      console.log(`\n${tag} ${chalk.bold('✓ Response received:')} ${response.status} ${response.statusText} (${duration}ms)`);
       
       if (loggingConfig.showResponse) {
         if (loggingConfig.showHeaders) {
-          console.log(chalk.bold('\nResponse Headers:'));
-          console.log(colorFn(JSON.stringify(response.headers, null, 2)));
+          console.log(`\n${tag} ${chalk.bold('Response Headers:')}`);
+          console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn));
         }
         
         if (response.data) {
-          console.log(chalk.bold('\nResponse Body:'));
+          console.log(`\n${tag} ${chalk.bold('Response Body:')}`);
           const responseBody = typeof response.data === 'string' 
             ? response.data 
             : JSON.stringify(response.data, null, 2);
-          console.log(colorFn(formatBody(responseBody)));
+          console.log(addColorTag(formatBody(responseBody), colorFn));
         }
       }
       
@@ -213,10 +219,10 @@ function createProxyServer(proxyConfig, loggingConfig) {
       res.status(response.status).send(response.data);
       
     } catch (error) {
-      console.error(chalk.red.bold('\n✗ Proxy Error:'), error.message);
+      console.error(`\n${tag} ${chalk.red.bold('✗ Proxy Error:')} ${error.message}`);
       if (error.response) {
-        console.error(chalk.red('Response Status:'), error.response.status);
-        console.error(chalk.red('Response Data:'), error.response.data);
+        console.error(`${tag} ${chalk.red('Response Status:')} ${error.response.status}`);
+        console.error(`${tag} ${chalk.red('Response Data:')} ${error.response.data}`);
       }
       
       res.status(error.response?.status || 500).json({
