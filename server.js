@@ -340,6 +340,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
   const server = app.listen(proxyConfig.port, () => {
     console.log(chalk.bold.white(`${proxyConfig.name} proxy started on port ${proxyConfig.port}`));
     console.log(chalk.gray(`   ↳ Proxying to: ${proxyConfig.target}`));
+    console.log(chalk.cyan(`   ↳ Run claude with \`ANTHROPIC_BASE_URL=http://localhost:${proxyConfig.port} claude\``));
   });
 
   return server;
