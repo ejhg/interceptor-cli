@@ -5,7 +5,7 @@ const yaml = require('js-yaml');
 const fs = require('fs');
 const path = require('path');
 const diff = require('deep-diff');
-const { isSSEResponse, formatSSEResponse } = require('./sse-parser');
+const { isSSEResponse, formatSSEResponse, parseSSE, reconstructMessageFromSSE } = require('./sse-parser');
 
 const CONFIG_FILE = process.env.CONFIG_FILE || 'config.yaml';
 
@@ -121,6 +121,43 @@ function formatDiff(differences, colorFn) {
   return output.join('\n');
 }
 
+function logCompact(colorFn, modelKey, method, url, status, duration, cacheInfo, usageInfo) {
+  const timestamp = new Date().toISOString().substring(11, 19); // HH:MM:SS format
+  const modelDisplay = modelKey ? ` [${modelKey}]` : '';
+  const tag = colorFn('>>');
+
+  // Cache status indicators
+  let cacheStatus = '';
+  if (cacheInfo.isFirstRequest) {
+    cacheStatus = chalk.blue(' [FIRST]');
+  } else if (cacheInfo.cacheBusted) {
+    cacheStatus = chalk.red(' [RESET]');
+  } else if (cacheInfo.hasDiff) {
+    cacheStatus = chalk.yellow(' [DIFF]');
+  } else {
+    cacheStatus = chalk.green(' [CACHED]');
+  }
+
+  // Usage info from response
+  let usageDisplay = '';
+  if (usageInfo) {
+    const inputTokens = usageInfo.input_tokens || 0;
+    const cacheRead = usageInfo.cache_read_input_tokens || 0;
+    const cacheCreate = usageInfo.cache_creation_input_tokens || 0;
+    const outputTokens = usageInfo.output_tokens || 0;
+
+    if (cacheRead > 0) {
+      usageDisplay = ` ${chalk.cyan(`cached:${cacheRead}`)}`;
+    }
+    if (cacheCreate > 0) {
+      usageDisplay += ` ${chalk.magenta(`create:${cacheCreate}`)}`;
+    }
+    usageDisplay += ` ${chalk.gray(`in:${inputTokens} out:${outputTokens}`)}`;
+  }
+
+  console.log(`${tag}${colorFn(modelDisplay)} [${timestamp}] ${method} ${url} → ${status} (${duration}ms)${cacheStatus}${usageDisplay}`);
+}
+
 function createProxyServer(proxyConfig, loggingConfig) {
   const app = express();
   
@@ -134,13 +171,13 @@ function createProxyServer(proxyConfig, loggingConfig) {
     const method = req.method;
     const url = req.url;
     const targetUrl = `${proxyConfig.target}${url}`;
-    
+
     // Process body early to get model key for header display
     const bodyContent = req.body ? (req.body instanceof Buffer ? req.body.toString() : req.body) : null;
     let isJsonWithModel = false;
     let parsedBody = null;
     let modelKey = null;
-    
+
     // Check if body is JSON and has a model property
     if (bodyContent) {
       try {
@@ -153,20 +190,31 @@ function createProxyServer(proxyConfig, loggingConfig) {
         // Not JSON or parsing error, treat as regular body
       }
     }
+
+    // Cache tracking for compact mode
+    const cacheInfo = {
+      isFirstRequest: false,
+      cacheBusted: false,
+      hasDiff: false
+    };
     
     const modelDisplay = modelKey ? ` [${modelKey}]` : '';
     const requestTag = colorFn('>>');
     const responseTag = colorFn('<<');
-    console.log('\n' + colorFn('━'.repeat(80)));
-    console.log(`${requestTag}${colorFn(modelDisplay)} [${timestamp}] ${proxyConfig.name}:${proxyConfig.port} | ${method} ${url}`);
+
+    // Use compact mode if enabled
+    if (!loggingConfig.compact) {
+      console.log('\n' + colorFn('━'.repeat(80)));
+      console.log(`${requestTag}${colorFn(modelDisplay)} [${timestamp}] ${proxyConfig.name}:${proxyConfig.port} | ${method} ${url}`);
+    }
     
-    if (loggingConfig.showQuery && Object.keys(req.query).length > 0) {
+    if (loggingConfig.showQuery && !loggingConfig.compact && Object.keys(req.query).length > 0) {
       console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Query Parameters:')}`);
       console.log(addColorTag(JSON.stringify(req.query, null, 2), colorFn, modelKey));
     }
     
     // Handle headers - show diff if we have a cached request with the same model
-    if (loggingConfig.showHeaders) {
+    if (loggingConfig.showHeaders && !loggingConfig.compact) {
       const filteredHeaders = { ...req.headers };
       delete filteredHeaders.host;
       
@@ -199,27 +247,34 @@ function createProxyServer(proxyConfig, loggingConfig) {
         // Check messages array logic
         let shouldDiff = false;
         let cacheBusted = false;
-        
+
         if (cachedData) {
           const currentMessages = parsedBody.messages || [];
           const cachedMessages = cachedData.body?.messages || [];
-          
+
           if (currentMessages.length >= cachedMessages.length) {
             shouldDiff = true;
           } else {
             cacheBusted = true;
+            cacheInfo.cacheBusted = true;
             requestCache.delete(modelKey);
           }
+        } else {
+          cacheInfo.isFirstRequest = true;
         }
         
         if (cachedData && shouldDiff) {
-          console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Request Body')}${chalk.gray(' - Showing diff from previous request:')}`);
           const differences = diff.diff(cachedData.body, parsedBody);
-          console.log(formatDiff(differences, colorFn));
-        } else if (cacheBusted) {
+          cacheInfo.hasDiff = differences && differences.length > 0;
+
+          if (!loggingConfig.compact) {
+            console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Request Body')}${chalk.gray(' - Showing diff from previous request:')}`);
+            console.log(formatDiff(differences, colorFn));
+          }
+        } else if (cacheBusted && !loggingConfig.compact) {
           console.log(`\n${requestTag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Cache busted (messages array reset), starting fresh...`)}`);
           console.log(addColorTag(formatBody(parsedBody), colorFn, modelKey));
-        } else {
+        } else if (!loggingConfig.compact) {
           console.log(`\n${requestTag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - First request, caching...`)}`);
           console.log(addColorTag(formatBody(parsedBody), colorFn, modelKey));
         }
@@ -263,9 +318,38 @@ function createProxyServer(proxyConfig, loggingConfig) {
       const response = await axios(requestConfig);
       
       const duration = Date.now() - startTime;
-      console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('✓ Received:')} ${response.status} ${response.statusText} (${duration}ms)`);
-      
-      if (loggingConfig.showResponse) {
+
+      // Extract usage information for compact mode
+      let usageInfo = null;
+      if (response.data && typeof response.data === 'object') {
+        usageInfo = response.data.usage;
+      } else if (typeof response.data === 'string') {
+        // Check if this is an SSE response first
+        if (isSSEResponse(response.headers)) {
+          // Parse SSE to get the reconstructed message with usage
+          const events = parseSSE(response.data);
+          const reconstructed = reconstructMessageFromSSE(events);
+          if (reconstructed && reconstructed.usage) {
+            usageInfo = reconstructed.usage;
+          }
+        } else {
+          try {
+            const parsed = JSON.parse(response.data);
+            usageInfo = parsed.usage;
+          } catch (e) {
+            // Not JSON, ignore
+          }
+        }
+      }
+
+      // Use compact logging if enabled
+      if (loggingConfig.compact) {
+        logCompact(colorFn, modelKey, method, url, response.status, duration, cacheInfo, usageInfo);
+      } else {
+        console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('✓ Received:')} ${response.status} ${response.statusText} (${duration}ms)`);
+      }
+
+      if (loggingConfig.showResponse && !loggingConfig.compact) {
         if (loggingConfig.showHeaders) {
           // Handle response headers diff if we have cached data
           if (isJsonWithModel && modelKey) {
@@ -321,20 +405,26 @@ function createProxyServer(proxyConfig, loggingConfig) {
       res.status(response.status).send(response.data);
       
     } catch (error) {
-      console.error(`\n${responseTag}${modelDisplay} ${chalk.red.bold('✗ Error:')} ${error.message}`);
-      if (error.response) {
-        console.error(`${responseTag}${modelDisplay} ${chalk.red('Status:')} ${error.response.status}`);
-        console.error(`${responseTag}${modelDisplay} ${chalk.red('Data:')} ${error.response.data}`);
+      if (loggingConfig.compact) {
+        logCompact(colorFn, modelKey, method, url, error.response?.status || 500, 0, cacheInfo, null);
+      } else {
+        console.error(`\n${responseTag}${modelDisplay} ${chalk.red.bold('✗ Error:')} ${error.message}`);
+        if (error.response) {
+          console.error(`${responseTag}${modelDisplay} ${chalk.red('Status:')} ${error.response.status}`);
+          console.error(`${responseTag}${modelDisplay} ${chalk.red('Data:')} ${error.response.data}`);
+        }
       }
-      
+
       res.status(error.response?.status || 500).json({
         error: 'Proxy Error',
         message: error.message,
         target: targetUrl
       });
     }
-    
-    console.log(colorFn('━'.repeat(80) + '\n'));
+
+    if (!loggingConfig.compact) {
+      console.log(colorFn('━'.repeat(80) + '\n'));
+    }
   });
 
   const server = app.listen(proxyConfig.port, () => {

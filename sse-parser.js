@@ -73,5 +73,7 @@ function formatSSEResponse(sseData, colorFn) {
 
 module.exports = {
   isSSEResponse,
-  formatSSEResponse
+  formatSSEResponse,
+  parseSSE,
+  reconstructMessageFromSSE
 };
