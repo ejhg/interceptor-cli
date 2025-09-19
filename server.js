@@ -54,6 +54,13 @@ function formatBody(body) {
   return bodyStr || '';
 }
 
+function logWithOptionalColor(text, colorFn, modelKey, isResponse = false, useColorTag = true) {
+  if (useColorTag) {
+    return addColorTag(text, colorFn, modelKey, isResponse);
+  }
+  return text;
+}
+
 function addColorTag(text, colorFn, modelKey, isResponse = false) {
   const arrow = isResponse ? '<<' : '>>';
   const tag = colorFn(arrow);
@@ -210,7 +217,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
     
     if (loggingConfig.showQuery && !loggingConfig.compact && Object.keys(req.query).length > 0) {
       console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Query Parameters:')}`);
-      console.log(addColorTag(JSON.stringify(req.query, null, 2), colorFn, modelKey));
+      console.log(logWithOptionalColor(JSON.stringify(req.query, null, 2), colorFn, modelKey, false, loggingConfig.useColorTag));
     }
     
     // Handle headers - show diff if we have a cached request with the same model
@@ -227,15 +234,15 @@ function createProxyServer(proxyConfig, loggingConfig) {
           if (headerDiffs && headerDiffs.length > 0) {
             console.log(formatDiff(headerDiffs, colorFn));
           } else {
-            console.log(addColorTag('  No header changes', colorFn, modelKey));
+            console.log(logWithOptionalColor('  No header changes', colorFn, modelKey, false, loggingConfig.useColorTag));
           }
         } else {
           console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Headers:')}`);
-          console.log(addColorTag(formatHeaders(filteredHeaders), colorFn, modelKey));
+          console.log(logWithOptionalColor(formatHeaders(filteredHeaders), colorFn, modelKey, false, loggingConfig.useColorTag));
         }
       } else {
         console.log(`\n${requestTag}${modelDisplay} ${chalk.bold('Headers:')}`);
-        console.log(addColorTag(formatHeaders(req.headers), colorFn, modelKey));
+        console.log(logWithOptionalColor(formatHeaders(req.headers), colorFn, modelKey, false, loggingConfig.useColorTag));
       }
     }
     
@@ -273,10 +280,10 @@ function createProxyServer(proxyConfig, loggingConfig) {
           }
         } else if (cacheBusted && !loggingConfig.compact) {
           console.log(`\n${requestTag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - Cache busted (messages array reset), starting fresh...`)}`);
-          console.log(addColorTag(formatBody(parsedBody), colorFn, modelKey));
+          console.log(logWithOptionalColor(formatBody(parsedBody), colorFn, modelKey, false, loggingConfig.useColorTag));
         } else if (!loggingConfig.compact) {
           console.log(`\n${requestTag} ${chalk.bold('Request Body')}${chalk.gray(` (model: ${modelKey}) - First request, caching...`)}`);
-          console.log(addColorTag(formatBody(parsedBody), colorFn, modelKey));
+          console.log(logWithOptionalColor(formatBody(parsedBody), colorFn, modelKey, false, loggingConfig.useColorTag));
         }
         
         // Update cache with the new request (including headers)
@@ -291,7 +298,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
         });
       } else {
         console.log(`\n${requestTag} ${chalk.bold('Request Body:')}`);
-        console.log(addColorTag(formatBody(bodyContent), colorFn, modelKey));
+        console.log(logWithOptionalColor(formatBody(bodyContent), colorFn, modelKey, false, loggingConfig.useColorTag));
       }
     }
 
@@ -361,11 +368,11 @@ function createProxyServer(proxyConfig, loggingConfig) {
               if (responseHeaderDiffs && responseHeaderDiffs.length > 0) {
                 console.log(formatDiff(responseHeaderDiffs, colorFn));
               } else {
-                console.log(addColorTag('  No response header changes', colorFn, modelKey, true));
+                console.log(logWithOptionalColor('  No response header changes', colorFn, modelKey, true, loggingConfig.useColorTag));
               }
             } else {
               console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Headers:')}`);
-              console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn, modelKey, true));
+              console.log(logWithOptionalColor(JSON.stringify(response.headers, null, 2), colorFn, modelKey, true, loggingConfig.useColorTag));
             }
             
             // Update cached response headers
@@ -375,7 +382,7 @@ function createProxyServer(proxyConfig, loggingConfig) {
             }
           } else {
             console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Headers:')}`);
-            console.log(addColorTag(JSON.stringify(response.headers, null, 2), colorFn, modelKey, true));
+            console.log(logWithOptionalColor(JSON.stringify(response.headers, null, 2), colorFn, modelKey, true, loggingConfig.useColorTag));
           }
         }
         
@@ -384,13 +391,13 @@ function createProxyServer(proxyConfig, loggingConfig) {
           if (isSSEResponse(response.headers)) {
             console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Body')}${chalk.gray(' (SSE stream):')}`);
             const formattedSSE = formatSSEResponse(response.data, colorFn);
-            console.log(addColorTag(formattedSSE, colorFn, modelKey, true));
+            console.log(logWithOptionalColor(formattedSSE, colorFn, modelKey, true, loggingConfig.useColorTag));
           } else {
             console.log(`\n${responseTag}${modelDisplay} ${chalk.bold('Body:')}`);
             const responseBody = typeof response.data === 'string' 
               ? response.data 
               : JSON.stringify(response.data, null, 2);
-            console.log(addColorTag(formatBody(responseBody), colorFn, modelKey, true));
+            console.log(logWithOptionalColor(formatBody(responseBody), colorFn, modelKey, true, loggingConfig.useColorTag));
           }
         }
       }

@@ -9,4 +9,5 @@ logging:
   showQuery: true
   showResponse: true
   maxBodyLength: 1000
-  compact: true
+  compact: false
+  useColorTag: false
