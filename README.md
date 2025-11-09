@@ -1,6 +1,6 @@
-# Multi-Port Proxy Server
+# claude-code Proxy Logger
 
-A Node.js application that can listen on multiple ports simultaneously and proxy requests to different target endpoints with rich, color-coded console logging.
+Intercept and log Anthropic API requests sent by claude-code
 
 ## Usage
 
@@ -8,14 +8,11 @@ A Node.js application that can listen on multiple ports simultaneously and proxy
 # Install dependencies
 npm i
 
-# Start with default config.yaml
-npm start
+# Development mode with auto-reload and file logging
+npm run dev -- --log-dir logs
 
 # Start with custom config file
-CONFIG_FILE=myconfig.yaml npm start
-
-# Development mode with auto-reload
-npm run dev
+CONFIG_FILE=myconfig.yaml npm run dev
 ```
 
 ## Compact vs Full

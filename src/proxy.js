@@ -7,7 +7,7 @@ const { logCompact } = require('./logging/compact');
 const { getCachedData, updateCache, updateResponseHeaders, analyzeCacheStatus } = require('./request-cache');
 const { isSSEResponse, formatSSEResponse, parseSSE, reconstructMessageFromSSE } = require('./sse-parser');
 
-function createProxyServer(proxyConfig, loggingConfig) {
+function createProxyServer(proxyConfig, loggingConfig, requestLogger = null) {
   const app = express();
 
   app.use(express.json({ limit: '50mb' }));
@@ -226,6 +226,27 @@ function createProxyServer(proxyConfig, loggingConfig) {
         }
       });
 
+      // Save request/response if logging is enabled
+      if (requestLogger && requestLogger.enabled) {
+        await requestLogger.saveRequest(
+          {
+            method,
+            url,
+            headers: req.headers,
+            query: req.query,
+            body: parsedBody || bodyContent,
+            modelKey
+          },
+          {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+            data: response.data,
+            duration
+          }
+        );
+      }
+
       res.status(response.status).send(response.data);
 
     } catch (error) {
@@ -237,6 +258,28 @@ function createProxyServer(proxyConfig, loggingConfig) {
           console.error(`${responseTag}${modelDisplay} ${chalk.red('Status:')} ${error.response.status}`);
           console.error(`${responseTag}${modelDisplay} ${chalk.red('Data:')} ${error.response.data}`);
         }
+      }
+
+      // Save error response if logging is enabled
+      if (requestLogger && requestLogger.enabled) {
+        await requestLogger.saveRequest(
+          {
+            method,
+            url,
+            headers: req.headers,
+            query: req.query,
+            body: parsedBody || bodyContent,
+            modelKey
+          },
+          {
+            status: error.response?.status || 500,
+            statusText: error.response?.statusText || 'Error',
+            headers: error.response?.headers || {},
+            data: error.response?.data || { error: error.message },
+            duration: 0,
+            error: error.message
+          }
+        );
       }
 
       res.status(error.response?.status || 500).json({
