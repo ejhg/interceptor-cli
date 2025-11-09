@@ -13,8 +13,16 @@ function parseCliArgs() {
     logDir = args[logDirIndex + 1];
   }
 
+  // Parse --port with its value
+  let port = null;
+  const portIndex = args.findIndex(arg => arg === '--port' || arg === '-p');
+  if (portIndex !== -1 && args[portIndex + 1]) {
+    port = parseInt(args[portIndex + 1], 10);
+  }
+
   return {
     logDir,
+    port,
     help: args.includes('--help') || args.includes('-h')
   };
 }
@@ -27,15 +35,17 @@ ${chalk.bold('Usage:')}
   node server.js [options]
 
 ${chalk.bold('Options:')}
-  --log-dir <path>    Save all requests/responses to specified directory
-  --help, -h          Show this help message
+  --port, -p <port>      Override the port from config file
+  --log-dir <path>       Save all requests/responses to specified directory
+  --help, -h             Show this help message
 
 ${chalk.bold('Environment Variables:')}
-  CONFIG_FILE         Path to config file (default: config.yaml)
+  CONFIG_FILE            Path to config file (default: config.yaml)
 
 ${chalk.bold('Examples:')}
+  node server.js --port 8000
   node server.js --log-dir ./logs
-  npm run dev -- --log-dir ./requests
+  npm run dev -- --port 8000 --log-dir ./requests
   `);
 }
 
@@ -49,33 +59,35 @@ function main() {
 
   const config = loadConfig();
 
-  if (!config.proxies || config.proxies.length === 0) {
-    console.error(chalk.red('No proxies configured in the configuration file!'));
+  if (!config.port || !config.target) {
+    console.error(chalk.red('Missing required configuration: port and target must be specified in config file!'));
     process.exit(1);
   }
 
   // Initialize request logger
   const requestLogger = new RequestLogger(cliArgs.logDir);
 
-  const servers = [];
+  // Override port from CLI if provided
+  const proxyConfig = {
+    port: cliArgs.port || config.port,
+    target: config.target
+  };
 
-  config.proxies.forEach(proxyConfig => {
-    try {
-      const server = createProxyServer(proxyConfig, config.logging || {}, requestLogger);
-      servers.push(server);
-    } catch (error) {
-      console.error(chalk.red(`Failed to start proxy "${proxyConfig.name}":`, error.message));
-    }
-  });
+  try {
+    const server = createProxyServer(proxyConfig, config.logging || {}, requestLogger);
 
-  process.on('SIGINT', () => {
-    console.log(chalk.yellow('\n\n👋 Shutting down proxy servers...'));
-    if (requestLogger.enabled) {
-      console.log(chalk.green(`Saved ${requestLogger.getRequestCount()} requests to ${requestLogger.getLogDir()}`));
-    }
-    servers.forEach(server => server.close());
-    process.exit(0);
-  });
+    process.on('SIGINT', () => {
+      console.log(chalk.yellow('\n\n👋 Shutting down proxy server...'));
+      if (requestLogger.enabled) {
+        console.log(chalk.green(`Saved ${requestLogger.getRequestCount()} requests to ${requestLogger.getLogDir()}`));
+      }
+      server.close();
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error(chalk.red(`Failed to start proxy server:`, error.message));
+    process.exit(1);
+  }
 }
 
 main();

@@ -54,7 +54,7 @@ function createProxyServer(proxyConfig, loggingConfig, requestLogger = null) {
     // Use compact mode if enabled
     if (!loggingConfig.compact) {
       console.log('\n' + colorFn('━'.repeat(80)));
-      console.log(`${requestTag}${colorFn(modelDisplay)} [${timestamp}] ${proxyConfig.name}:${proxyConfig.port} | ${method} ${url}`);
+      console.log(`${requestTag}${colorFn(modelDisplay)} [${timestamp}] ${method} ${url}`);
     }
 
     if (loggingConfig.showQuery && !loggingConfig.compact && Object.keys(req.query).length > 0) {
@@ -295,7 +295,7 @@ function createProxyServer(proxyConfig, loggingConfig, requestLogger = null) {
   });
 
   const server = app.listen(proxyConfig.port, () => {
-    console.log(chalk.bold.white(`${proxyConfig.name} proxy started on port ${proxyConfig.port}`));
+    console.log(chalk.bold.white(`Proxy server started on port ${proxyConfig.port}`));
     console.log(chalk.gray(`   ↳ Proxying to: ${proxyConfig.target}`));
     console.log(chalk.cyan(`   ↳ Run claude with \`ANTHROPIC_BASE_URL=http://localhost:${proxyConfig.port} claude\``));
   });

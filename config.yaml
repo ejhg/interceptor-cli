@@ -1,8 +1,6 @@
-proxies:
-  - name: "api"
-    port: 7000
-    target: "https://api.anthropic.com"
-    
+port: 7000
+target: "https://api.anthropic.com"
+
 logging:
   showHeaders: true
   showBody: true
