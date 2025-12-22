@@ -145,25 +145,31 @@ function createProxyServer(proxyConfig, loggingConfig, requestLogger = null) {
 
       const duration = Date.now() - startTime;
 
-      // Extract usage information for compact mode
+      // Parse response data to normalized JSON format for logging
+      let normalizedResponseData = response.data;
       let usageInfo = null;
+
       if (response.data && typeof response.data === 'object') {
+        // Already an object
         usageInfo = response.data.usage;
       } else if (typeof response.data === 'string') {
         // Check if this is an SSE response first
         if (isSSEResponse(response.headers)) {
-          // Parse SSE to get the reconstructed message with usage
+          // Parse SSE to get the reconstructed message
           const events = parseSSE(response.data);
           const reconstructed = reconstructMessageFromSSE(events);
-          if (reconstructed && reconstructed.usage) {
+          if (reconstructed) {
+            normalizedResponseData = reconstructed;
             usageInfo = reconstructed.usage;
           }
         } else {
+          // Try to parse as JSON
           try {
             const parsed = JSON.parse(response.data);
+            normalizedResponseData = parsed;
             usageInfo = parsed.usage;
           } catch (e) {
-            // Not JSON, ignore
+            // Not JSON, keep as string
           }
         }
       }
@@ -241,7 +247,7 @@ function createProxyServer(proxyConfig, loggingConfig, requestLogger = null) {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers,
-            data: response.data,
+            data: normalizedResponseData,
             duration
           }
         );
