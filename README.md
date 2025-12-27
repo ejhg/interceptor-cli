@@ -9,7 +9,7 @@ Intercept and log Anthropic API requests sent by claude-code
 npm i
 
 # Development mode with auto-reload and file logging
-npm run dev -- --log-dir logs
+npm run dev -- --log-group my-session  # saves to logs/my-session/
 
 # Start with custom config file
 CONFIG_FILE=myconfig.yaml npm run dev

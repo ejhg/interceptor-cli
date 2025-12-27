@@ -6,11 +6,11 @@ const { RequestLogger } = require('./src/request-logger');
 function parseCliArgs() {
   const args = process.argv.slice(2);
 
-  // Parse --log-dir with its value
-  let logDir = null;
-  const logDirIndex = args.findIndex(arg => arg === '--log-dir');
-  if (logDirIndex !== -1 && args[logDirIndex + 1]) {
-    logDir = args[logDirIndex + 1];
+  // Parse --log-group with its value
+  let logGroup = null;
+  const logGroupIndex = args.findIndex(arg => arg === '--log-group');
+  if (logGroupIndex !== -1 && args[logGroupIndex + 1]) {
+    logGroup = args[logGroupIndex + 1];
   }
 
   // Parse --port with its value
@@ -21,7 +21,7 @@ function parseCliArgs() {
   }
 
   return {
-    logDir,
+    logGroup,
     port,
     help: args.includes('--help') || args.includes('-h')
   };
@@ -36,7 +36,7 @@ ${chalk.bold('Usage:')}
 
 ${chalk.bold('Options:')}
   --port, -p <port>      Override the port from config file
-  --log-dir <path>       Save all requests/responses to specified directory
+  --log-group <name>     Save all requests/responses to logs/<name> directory
   --help, -h             Show this help message
 
 ${chalk.bold('Environment Variables:')}
@@ -44,8 +44,8 @@ ${chalk.bold('Environment Variables:')}
 
 ${chalk.bold('Examples:')}
   node server.js --port 8000
-  node server.js --log-dir ./logs
-  npm run dev -- --port 8000 --log-dir ./requests
+  node server.js --log-group session1        # saves to logs/session1/
+  npm run dev -- --port 8000 --log-group test  # saves to logs/test/
   `);
 }
 
@@ -64,8 +64,9 @@ function main() {
     process.exit(1);
   }
 
-  // Initialize request logger
-  const requestLogger = new RequestLogger(cliArgs.logDir);
+  // Initialize request logger - log-group is always a subdirectory within logs/
+  const logDir = cliArgs.logGroup ? `logs/${cliArgs.logGroup}` : null;
+  const requestLogger = new RequestLogger(logDir);
 
   // Override port from CLI if provided
   const proxyConfig = {
